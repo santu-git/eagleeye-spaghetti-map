@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <script src="https://d3js.org/d3.v5.min.js"></script>
+  <script src="https://d3js.org/d3-selection-multi.v1.min.js"></script>
+  <script src="https://d3js.org/d3-scale-chromatic.v1.min.js"></script>
+  <style>
+    .info-box {
+      box-shadow: 5px 10px #888888;
+    }
+
+    .baseline {
+      stroke-dasharray: 4 4;
+    }
+  </style>
+</head>
+
+<body>
+
+</body>
+<script>
+  var currentZoom = 0;
+  pathBandSize = 10;
+  currentTransform = null;
+  var canvasSize = 960;
+  var drawingPaths = [];
+  var scaleX = d3.scaleLinear().domain([0, 6500]).range([0, 960])
+  var scaleY = d3.scaleLinear().domain([0, 4595]).range([0, 678.65])
+  var randPointGenY = d3.scaleLinear()
+    .domain([0.0, 0.5, 1.0])
+    .range([-15, 8, 15]);
+  var randPointGenX = d3.scaleLinear()
+    .domain([0.0, 0.5, 1.0])
+    .range([-30, 15, 30]);
+  var svg = d3.select("body").append("svg")
+    .attr("width", canvasSize)
+    .attr("height", canvasSize);
+
+  var svg = svg.append('g').attr('class', 'zoom-layer').call(draw)
+    .call(d3.zoom().on("zoom", function () {
+      currentZoom = d3.event.transform.k;
+      currentTransform = d3.event.transform;
+      svg.attr("transform", d3.event.transform)
+    }));
+
+
+  svg.append('g').attr('id', 'image-layer').append('image').attr('xlink:href', 'floor_plan.png').attr('width',
+    canvasSize);
+  // prePathData = [
+  //   [560, 415],
+  //   [700, 415],
+  // ];
+  prePathData = [
+    [585.47607421875, 370.81536865234375],
+    [716.4366455078125, 370.81536865234375],
+
+  ];
+  path2Data = [
+    [657.5877075195312, 341.1693420410156],
+    [679.0869140625, 344.98931884765625],
+    [680.1748046875, 370.3189697265625]
+  ]
+
+
+  var nodeCanvas = svg.append('g').attr('class', 'node-canvas');
+  var pathDrawCanvas = svg.append('g').attr('class', 'path-draw-canvas');
+  var pathCanvas = svg.append('g').attr('class', 'path-canvas');
+  var longPathCanvas = svg.append('g').attr('class', 'long-canvas');
+  var legendCanvas = svg.append('g').attr('class', 'legend-canvas');
+  var infoCanvas = svg.append('g').attr('class', 'info-canvas');
+
+  pathLine = d3.line()
+    .x(function (d) {
+      return d[0];
+    })
+    .y(function (d) {
+      return d[1];
+    });
+  path1 = pathLine(prePathData);
+  //path3 = pathLine(prePathData2);
+  doublePath = path1;
+  possiblePath = pathDrawCanvas.append('path').datum(prePathData)
+    .attr('d', doublePath)
+    .attrs({
+      'stroke': 'grey',
+      'stroke-width': '0.5',
+      fill: 'none',
+      opacity: 0.3
+    }).classed("baseline", !0);
+  d3.json('node.json').then(function (rects) {
+    nodeCanvas.selectAll('rect').data(rects).enter().append('rect').each(function (d, i) {
+      d3.select(this).attrs({
+        id: d.id,
+        x: d.x,
+        y: d.y,
+        width: d.width,
+        height: d.height,
+        'stroke-width': 0.35,
+        'stroke': 'black',
+        fill: 'none'
+      }).on('click', function (d, i) {
+        console.log(d, i);
+      });
+    });
+    renderPath();
+  })
+
+  pathDensityGroup = {};
+  pathLengthGroup = [];
+  pathDensityColor = d3.piecewise(d3.interpolateHsl, ["green", "orange", "red", "black"])
+  //multiColor = d3.interpolateRainbow;
+  multiColor = d3.interpolateSinebow;
+  schemeOranges = d3.interpolateOranges;
+  schemeBlue = d3.interpolateBlues;
+
+  var curveLine = d3.line().x(function (d) {
+    return d[0]
+  }).y(function (d) {
+    return d[1]
+  }).curve(d3.curveLinear);
+  //}).curve(d3.curveCardinal.tension(0));
+
+  function renderPath() {
+    let lineCount = 0;
+    d3.csv("data.csv").then(function (productMoves) {
+      let productGroup = d3.nest()
+        .key(function (d) {
+          return d.product;
+        })
+        .entries(productMoves);
+      //console.log(productGroup);
+      for (idx in productGroup) {
+        productionLines = productGroup[idx].values
+        let productionLinesGroup = d3.nest()
+          .key(function (d) {
+            return d.production_no;
+          }).entries(productionLines);
+        for (productLine of productionLinesGroup) {
+          lineCount++;
+          var points = [];
+          for (node of productLine.values) {
+            try {
+              let bBox = d3.select('#Z-' + node.node).node().getBBox();
+              let point = {
+                x: (bBox.x + bBox.width / 2),
+                y: (bBox.y + bBox.height / 2)
+              }
+              // // Point position move on x,y based on close path direction.
+
+              //console.log("Shift ", idx, point);
+              points.push(point)
+
+            } catch (e) {
+              //console.log(node, e);
+            }
+          }
+          points = doDisplacement(points, lineCount);
+          console.log(productLine.key);
+          getPath(points, idx, lineCount, productLine);
+
+        }
+      }
+    })
+  }
+
+  function doDisplacement(points, lineCount) {
+    let lastIndex = points.length - 1;
+    if (points[0].x < points[lastIndex].x) {
+      //console.log('Towards Right');
+      for (let i = 0; i < points.length; i++) {
+        points[i].x += lineCount * 0.5;
+      }
+    } else if (points[0].x > points[lastIndex].x) {
+      for (let i = 0; i < points.length; i++) {
+        points[i].x -= lineCount * 0.5;
+      }
+    } else {
+      //console.log("Same Level X");
+    }
+    if (points[0].y < points[lastIndex].y) {
+      for (let i = 0; i < points.length; i++) {
+        points[i].y += lineCount * 0.5;
+      }
+    } else if (points[0].y > points[lastIndex].y) {
+      for (let i = 0; i < points.length; i++) {
+        points[i].y -= lineCount * 0.5;
+      }
+    } else {
+      //console.log("Same Level Y");
+    }
+    return points;
+  }
+
+  function getPath(points, productIndex, lineCount, productLine) {
+    jaggedPoints = [];
+    pairwise(points, function (current, next, index) {
+      let x1 = closestPoint(possiblePath.node(), [current.x, current.y], lineCount * 0.5)
+      //x1 = shiftOnPath(current, x1, lineCount);
+      let x2 = closestPoint(possiblePath.node(), [next.x, next.y], lineCount * 0.5)
+      //x2 = shiftOnPath(current, x2, lineCount);
+      jaggedPoints.push(...[
+        [current.x, current.y],
+        [x1[0], x1[1]]
+      ]);
+      //productPath += curveLine(finalPoints);
+      jaggedPoints.push(...[
+        [x2[0], x2[1]],
+        [next.x, next.y]
+      ]);
+      //productPath += curveLine(finalPoints);
+    });
+    productPath = curveLine(jaggedPoints);
+    let path = pathCanvas.append('path').attrs({
+        d: productPath,
+        stroke: multiColor(productIndex * 0.3),
+        //stroke: '#FF0000',
+        'stroke-width': 0.1,
+        "fill": "none",
+        opacity: 0.7,
+        class: 'move-path',
+      }).call(function (t) {
+        return transitionLine(t, 400)
+      })
+      .on('mouseover', function () {
+        renderInfoCanvas({
+          product: productLine.values[0].product,
+          production_no: productLine.values[0].production_no
+        }, {
+          x: d3.mouse(this)[0],
+          y: d3.mouse(this)[1]
+        })
+        d3.select(this).attrs({
+          'opacity': 1,
+          'stroke-width': .3
+        })
+      }).on('mouseout', function () {
+        removeInfoCanvas();
+        d3.select(this).attrs({
+          'opacity': 0.7,
+          'stroke-width': 0.1
+        })
+      });
+  }
+
+  function renderInfoCanvas(data, position) {
+    let width = 140 / currentZoom;
+    width = isFinite(width) ? width : 140;
+    let height = 60 / currentZoom;
+    height = isFinite(height) ? height : 60;
+    let lineWidth = 1 / currentZoom;
+    lineWidth = isFinite(lineWidth) ? lineWidth : 1;
+    let offset = 10 / currentZoom
+    offset = isFinite(offset) ? offset : 10;
+    infoCanvas.append('rect').attrs({
+      class: 'info-box',
+      x: position.x + offset,
+      y: position.y + offset,
+      width: width,
+      height: height,
+      fill: 'white',
+      'stroke-width': lineWidth,
+      'stroke': 'black',
+    })
+
+    let fontSize = 15 / currentZoom;
+    fontSize = isFinite(fontSize) ? fontSize : 15;
+
+    let offsetX = 15 / currentZoom
+    offsetX = isFinite(offsetX) ? offsetX : 15;
+
+    let offsetY = 30 / currentZoom
+    offsetY = isFinite(offsetY) ? offsetY : 30;
+    infoCanvas.append("text").text("Product name: " + data.product).attrs({
+      x: position.x + offsetX,
+      y: position.y + offsetY,
+      'font-size': fontSize,
+    })
+    offsetY = 50 / currentZoom
+    offsetY = isFinite(offsetY) ? offsetY : 50;
+    infoCanvas.append("text").text("Product Line: " + data.production_no).attrs({
+      x: position.x + offsetX,
+      y: position.y + offsetY,
+      'font-size': fontSize,
+    })
+  }
+
+  function removeInfoCanvas() {
+    infoCanvas.selectAll('text').remove();
+    infoCanvas.selectAll('rect').remove();
+  }
+
+  function pairwise(arr, func, skips) {
+
+    skips = skips || 1;
+    for (var i = 0; i < arr.length - skips; i++) {
+      func(arr[i], arr[i + skips], i)
+    }
+  }
+  var lineFunction = d3.line().x(function (d) {
+    return d.x;
+  }).y(function (d) {
+    return d.y;
+  });
+
+  function scrollZoom(selection) {
+    d3.zoom().on("zoom", function () {
+      selection.attr("transform", d3.event.transform)
+    })
+  }
+
+  function draw(selection) {
+    var xy0,
+      path,
+      keep = false,
+      line = d3.line()
+      .x(function (d) {
+        return d[0];
+      })
+      .y(function (d) {
+        return d[1];
+      });
+    var xyPoints = [];
+    path = null;
+    selection.on("click", function () {
+      if (d3.event.shiftKey) {
+        if (xyPoints.length == 0) {
+          xyPoints.push(d3.mouse(this))
+          console.log(xyPoints);
+        } else {
+          xyPoints.push(d3.mouse(this))
+          console.log("Width:", xyPoints[0][0] - xyPoints[1][0]);
+          console.log("Height:", xyPoints[0][1] - xyPoints[1][1]);
+          xyPoints = [];
+          xyPoints.push(d3.mouse(this))
+        }
+
+        // console.log(svg);
+        // svg.append('circle').attrs({
+        //   cx: d3.mouse(this)[0],
+        //   cy: d3.mouse(this)[1],
+        //   r: 0.3,
+        //   fill: 'red'
+        // });
+        // console.log(d3.mouse(this));
+      }
+    });
+    /*selection.on('click', function () {
+          console.log("Mouse Down");
+          keep = true;
+          console.log(d3.mouse(this));
+          xy0 = d3.mouse(this);
+          path = d3.select('svg')
+            .append('path')
+            .attr('d', line([xy0, xy0]))
+            .attrs({
+              'stroke': 'yellow',
+              'stroke-width': '1'
+            });
+      })
+      .on('mouseup', function () {
+        keep = false;
+        endXY = d3.mouse(this);
+        drawingPaths.push([xy0, [endXY[0], endXY[1]]])
+        console.log(JSON.stringify(drawingPaths));
+      })
+      .on('mousemove', function () {
+        if (keep) {
+
+          Line = line([xy0, d3.mouse(this).map(function (x) {
+            return x - 1;
+          })]);
+          path.attr('d', Line);
+        }
+      });*/
+
+
+  }
+
+  function closestPoint(pathNode, point, adjustment) {
+    var pathLength = pathNode.getTotalLength(),
+      precision = 8,
+      best,
+      bestLength,
+      bestDistance = Infinity;
+
+    // linear scan for coarse approximation
+    for (var scan, scanLength = 0, scanDistance; scanLength <= pathLength; scanLength += precision) {
+
+      if ((scanDistance = distance2(scan = pathNode.getPointAtLength(scanLength))) < bestDistance) {
+        best = scan, bestLength = scanLength, bestDistance = scanDistance;
+      }
+    }
+
+    // binary search for precise estimate
+    precision /= 200;
+    while (precision > 0.005) {
+      var before,
+        after,
+        beforeLength,
+        afterLength,
+        beforeDistance,
+        afterDistance;
+      if ((beforeLength = bestLength - precision) >= 0 && (beforeDistance = distance2(before = pathNode
+          .getPointAtLength(beforeLength))) < bestDistance) {
+        best = before, bestLength = beforeLength, bestDistance = beforeDistance;
+      } else if ((afterLength = bestLength + precision) <= pathLength && (afterDistance = distance2(after =
+          pathNode.getPointAtLength(afterLength))) < bestDistance) {
+        best = after, bestLength = afterLength, bestDistance = afterDistance;
+      } else {
+        precision /= 2;
+      }
+    }
+
+    best.distance = Math.sqrt(bestDistance);
+    let calculatedAdjustment = adjustmentOnPath(point, best, adjustment);
+    best[calculatedAdjustment.axis] += calculatedAdjustment.adjustment;
+    best = [best.x, best.y];
+    return best;
+
+    function distance2(p) {
+      var dx = p.x - point[0],
+        dy = p.y - point[1];
+      return dx * dx + dy * dy;
+    }
+  }
+
+  function adjustmentOnPath(refCord, actual, adjustment) {
+    shiftParams = {
+      axis: '',
+      adjustment: 0
+    };
+    if (Math.floor(refCord[0]) == Math.floor(actual.x)) {
+      // path on X axis
+      shiftParams.axis = 'y'
+      if (refCord[1] > actual.y) {
+        shiftParams.adjustment = +adjustment;
+      } else {
+        shiftParams.adjustment = -adjustment;
+      }
+
+    } else {
+      //Path On Y axis
+      shiftParams.axis = 'x'
+      if (refCord[0] > actual.x) {
+        shiftParams.adjustment = -adjustment;
+      } else {
+        shiftParams.adjustment = adjustment;
+      }
+    }
+
+    return shiftParams;
+  }
+
+  function rotate(t, a, n) {
+    var e = t[0],
+      i = t[1],
+      r = a[0],
+      d = a[1],
+      h = e + (r - e) * Math.cos(n) - (d - i) * Math.sin(n),
+      o = i + (r - e) * Math.sin(n) + (d - i) * Math.cos(n);
+    return [h, o]
+  }
+
+  function createJaggedPoints(t, a, n, e) {
+    var i = !1;
+    if (t[0] > a[0]) {
+      var r = t;
+      t = a, a = r, i = !0
+    }
+    var d = t[0],
+      h = t[1],
+      o = a[0],
+      s = a[1],
+      g = [t],
+      u = s - h,
+      c = o - d,
+      p = -Math.atan(u / c),
+      l = Math.sqrt(Math.pow(o - d, 2) + Math.pow(s - h, 2));
+    e || (e = .05 * l);
+    for (var v = rotate(t, a, p), w = v[0], m = v[1], f = d; f < w - e;) {
+      var P = Math.min(f + e + Math.random() * e, w - e),
+        M = n * (Math.random() - .5) + h;
+      g.push([P, M]), f = P
+    }
+    g.push([w, m]);
+    var k = g.map(function (n, e) {
+      return 0 === e ? t : e === g.length - 1 ? a : rotate(t, n, -p)
+    });
+    return i ? k.reverse() : k
+  }
+
+  function transitionLine(t, a) {
+    var n = t.node().getTotalLength();
+    t.attr("stroke-dasharray", "0,100000").transition().duration(n / (a / 1e3)).ease(d3.easeQuadOut).attrTween(
+      "stroke-dasharray",
+      function () {
+        var t = this.getTotalLength();
+        return d3.interpolateString("0," + t, t + "," + t)
+      }).on("end", function () {
+      d3.select(this).attr("stroke-dasharray", "none")
+    })
+  }
+</script>
+
+</html>
