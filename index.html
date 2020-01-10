@@ -21,6 +21,7 @@
 </body>
 <script>
   var currentZoom = 0;
+
   pathBandSize = 10;
   currentTransform = null;
   var canvasSize = 960;
@@ -156,7 +157,6 @@
             }
           }
           points = doDisplacement(points, lineCount);
-          console.log(productLine.key);
           getPath(points, idx, lineCount, productLine);
 
         }
@@ -165,56 +165,36 @@
   }
 
   function doDisplacement(points, lineCount) {
-    let lastIndex = points.length - 1;
-    if (points[0].x < points[lastIndex].x) {
-      //console.log('Towards Right');
-      for (let i = 0; i < points.length; i++) {
-        points[i].x += lineCount * 0.5;
+    for (i in points) {
+      let lineDirection = closestPoint(possiblePath.node(), [points[i].x, points[i].y], 0);
+      if (Math.floor(lineDirection[0]) == Math.floor(points[i].x)) {
+        points[i].x += (pathBandSize / 4 - lineCount) * 0.5
+      } else {
+        points[i].y += (pathBandSize / 4 - lineCount) * 0.5
       }
-    } else if (points[0].x > points[lastIndex].x) {
-      for (let i = 0; i < points.length; i++) {
-        points[i].x -= lineCount * 0.5;
-      }
-    } else {
-      //console.log("Same Level X");
     }
-    if (points[0].y < points[lastIndex].y) {
-      for (let i = 0; i < points.length; i++) {
-        points[i].y += lineCount * 0.5;
-      }
-    } else if (points[0].y > points[lastIndex].y) {
-      for (let i = 0; i < points.length; i++) {
-        points[i].y -= lineCount * 0.5;
-      }
-    } else {
-      //console.log("Same Level Y");
-    }
+
     return points;
   }
 
   function getPath(points, productIndex, lineCount, productLine) {
     jaggedPoints = [];
     pairwise(points, function (current, next, index) {
-      let x1 = closestPoint(possiblePath.node(), [current.x, current.y], lineCount * 0.5)
-      //x1 = shiftOnPath(current, x1, lineCount);
-      let x2 = closestPoint(possiblePath.node(), [next.x, next.y], lineCount * 0.5)
-      //x2 = shiftOnPath(current, x2, lineCount);
+      let x1 = closestPoint(possiblePath.node(), [current.x, current.y], (pathBandSize / 4 - lineCount) * 0.5)
+      let x2 = closestPoint(possiblePath.node(), [next.x, next.y], (pathBandSize / 4 - lineCount) * 0.5)
       jaggedPoints.push(...[
         [current.x, current.y],
         [x1[0], x1[1]]
       ]);
-      //productPath += curveLine(finalPoints);
       jaggedPoints.push(...[
         [x2[0], x2[1]],
         [next.x, next.y]
       ]);
-      //productPath += curveLine(finalPoints);
     });
     productPath = curveLine(jaggedPoints);
     let path = pathCanvas.append('path').attrs({
         d: productPath,
         stroke: multiColor(productIndex * 0.3),
-        //stroke: '#FF0000',
         'stroke-width': 0.1,
         "fill": "none",
         opacity: 0.7,
@@ -326,11 +306,8 @@
       if (d3.event.shiftKey) {
         if (xyPoints.length == 0) {
           xyPoints.push(d3.mouse(this))
-          console.log(xyPoints);
         } else {
           xyPoints.push(d3.mouse(this))
-          console.log("Width:", xyPoints[0][0] - xyPoints[1][0]);
-          console.log("Height:", xyPoints[0][1] - xyPoints[1][1]);
           xyPoints = [];
           xyPoints.push(d3.mouse(this))
         }
@@ -412,10 +389,10 @@
       }
     }
 
-    best.distance = Math.sqrt(bestDistance);
     let calculatedAdjustment = adjustmentOnPath(point, best, adjustment);
     best[calculatedAdjustment.axis] += calculatedAdjustment.adjustment;
     best = [best.x, best.y];
+    best.distance = Math.sqrt(bestDistance);
     return best;
 
     function distance2(p) {
@@ -433,20 +410,11 @@
     if (Math.floor(refCord[0]) == Math.floor(actual.x)) {
       // path on X axis
       shiftParams.axis = 'y'
-      if (refCord[1] > actual.y) {
-        shiftParams.adjustment = +adjustment;
-      } else {
-        shiftParams.adjustment = -adjustment;
-      }
-
+      shiftParams.adjustment = +adjustment;
     } else {
       //Path On Y axis
       shiftParams.axis = 'x'
-      if (refCord[0] > actual.x) {
-        shiftParams.adjustment = -adjustment;
-      } else {
-        shiftParams.adjustment = adjustment;
-      }
+      shiftParams.adjustment = +adjustment;
     }
 
     return shiftParams;
