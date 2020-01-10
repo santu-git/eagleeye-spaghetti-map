@@ -168,9 +168,9 @@
     for (i in points) {
       let lineDirection = closestPoint(possiblePath.node(), [points[i].x, points[i].y], 0);
       if (Math.floor(lineDirection[0]) == Math.floor(points[i].x)) {
-        points[i].x += (pathBandSize / 4 - lineCount) * 0.5
+        points[i].x += (pathBandSize / 2 - lineCount) * 0.5
       } else {
-        points[i].y += (pathBandSize / 4 - lineCount) * 0.5
+        points[i].y += (pathBandSize / 2 - lineCount) * 0.5
       }
     }
 
