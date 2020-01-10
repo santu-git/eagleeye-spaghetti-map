@@ -21,7 +21,7 @@
 </body>
 <script>
   var currentZoom = 0;
-
+  var possiblePaths = [];
   pathBandSize = 10;
   currentTransform = null;
   var canvasSize = 960;
@@ -48,22 +48,6 @@
 
   svg.append('g').attr('id', 'image-layer').append('image').attr('xlink:href', 'floor_plan.png').attr('width',
     canvasSize);
-  // prePathData = [
-  //   [560, 415],
-  //   [700, 415],
-  // ];
-  prePathData = [
-    [585.47607421875, 370.81536865234375],
-    [716.4366455078125, 370.81536865234375],
-
-  ];
-  path2Data = [
-    [657.5877075195312, 341.1693420410156],
-    [679.0869140625, 344.98931884765625],
-    [680.1748046875, 370.3189697265625]
-  ]
-
-
   var nodeCanvas = svg.append('g').attr('class', 'node-canvas');
   var pathDrawCanvas = svg.append('g').attr('class', 'path-draw-canvas');
   var pathCanvas = svg.append('g').attr('class', 'path-canvas');
@@ -78,17 +62,6 @@
     .y(function (d) {
       return d[1];
     });
-  path1 = pathLine(prePathData);
-  //path3 = pathLine(prePathData2);
-  doublePath = path1;
-  possiblePath = pathDrawCanvas.append('path').datum(prePathData)
-    .attr('d', doublePath)
-    .attrs({
-      'stroke': 'grey',
-      'stroke-width': '0.5',
-      fill: 'none',
-      opacity: 0.3
-    }).classed("baseline", !0);
   d3.json('node.json').then(function (rects) {
     nodeCanvas.selectAll('rect').data(rects).enter().append('rect').each(function (d, i) {
       d3.select(this).attrs({
@@ -104,6 +77,19 @@
         console.log(d, i);
       });
     });
+
+  })
+  d3.json('path.json').then(function (paths) {
+    possiblePaths = pathDrawCanvas.selectAll('path').data(paths).enter().append('path').each(function (pathData,
+      i) {
+      d3.select(this).attrs({
+        d: pathLine([pathData.src, pathData.dst]),
+        'stroke': 'grey',
+        'stroke-width': '0.5',
+        fill: 'none',
+        opacity: 0.3
+      }).classed("baseline", !0);
+    })
     renderPath();
   })
 
@@ -166,7 +152,8 @@
 
   function doDisplacement(points, lineCount) {
     for (i in points) {
-      let lineDirection = closestPoint(possiblePath.node(), [points[i].x, points[i].y], 0);
+      let nearPath = findNearestPath([points[i].x, points[i].y]);
+      let lineDirection = closestPoint(nearPath, [points[i].x, points[i].y], 0);
       if (Math.floor(lineDirection[0]) == Math.floor(points[i].x)) {
         points[i].x += (pathBandSize / 2 - lineCount) * 0.5
       } else {
@@ -177,11 +164,26 @@
     return points;
   }
 
+  function findNearestPath(point) {
+    let nearestPath = null;
+    let distance = Infinity;
+    for (pathNode of possiblePaths.nodes()) {
+      let current = closestPoint(pathNode, point, 0)
+      if (current.distance < distance) {
+        distance = current.distance;
+        nearestPath = pathNode;
+      }
+    }
+    return nearestPath;
+  }
+
   function getPath(points, productIndex, lineCount, productLine) {
     jaggedPoints = [];
     pairwise(points, function (current, next, index) {
-      let x1 = closestPoint(possiblePath.node(), [current.x, current.y], (pathBandSize / 4 - lineCount) * 0.5)
-      let x2 = closestPoint(possiblePath.node(), [next.x, next.y], (pathBandSize / 4 - lineCount) * 0.5)
+      let nearPath = findNearestPath([current.x, current.y]);
+      let x1 = closestPoint(nearPath, [current.x, current.y], (pathBandSize / 4 - lineCount) * 0.5)
+      nearPath = findNearestPath([next.x, next.y]);
+      let x2 = closestPoint(nearPath, [next.x, next.y], (pathBandSize / 4 - lineCount) * 0.5)
       jaggedPoints.push(...[
         [current.x, current.y],
         [x1[0], x1[1]]
@@ -322,18 +324,18 @@
         // console.log(d3.mouse(this));
       }
     });
-    /*selection.on('click', function () {
-          console.log("Mouse Down");
-          keep = true;
-          console.log(d3.mouse(this));
-          xy0 = d3.mouse(this);
-          path = d3.select('svg')
-            .append('path')
-            .attr('d', line([xy0, xy0]))
-            .attrs({
-              'stroke': 'yellow',
-              'stroke-width': '1'
-            });
+    selection.on('click', function () {
+        console.log("Mouse Down");
+        keep = true;
+        console.log(d3.mouse(this));
+        xy0 = d3.mouse(this);
+        path = d3.select('svg')
+          .append('path')
+          .attr('d', line([xy0, xy0]))
+          .attrs({
+            'stroke': 'yellow',
+            'stroke-width': '1'
+          });
       })
       .on('mouseup', function () {
         keep = false;
@@ -349,7 +351,7 @@
           })]);
           path.attr('d', Line);
         }
-      });*/
+      });
 
 
   }
