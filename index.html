@@ -22,6 +22,7 @@
 <script>
   var currentZoom = 0;
   var possiblePaths = [];
+  var externalPossiblePaths = [];
   pathBandSize = 10;
   currentTransform = null;
   var canvasSize = 960;
@@ -50,6 +51,7 @@
     canvasSize);
   var nodeCanvas = svg.append('g').attr('class', 'node-canvas');
   var pathDrawCanvas = svg.append('g').attr('class', 'path-draw-canvas');
+  var extPathDrawCanvas = svg.append('g').attr('class', 'ext-path-draw-canvas');
   var pathCanvas = svg.append('g').attr('class', 'path-canvas');
   var longPathCanvas = svg.append('g').attr('class', 'long-canvas');
   var legendCanvas = svg.append('g').attr('class', 'legend-canvas');
@@ -80,10 +82,29 @@
 
   })
   d3.json('path.json').then(function (paths) {
-    possiblePaths = pathDrawCanvas.selectAll('path').data(paths).enter().append('path').each(function (pathData,
+    externalPossiblePaths = extPathDrawCanvas.selectAll('path').data(paths.filter(function (d) {
+      return d.type == 'external';
+    })).enter().append('path').each(function (pathData,
       i) {
       d3.select(this).attrs({
         d: pathLine([pathData.src, pathData.dst]),
+        id: pathData.id,
+        'stroke': 'red',
+        'stroke-width': '0.5',
+        fill: 'none',
+        opacity: 0.3
+      }).classed("baseline", !0);
+    })
+    renderPath();
+  })
+  d3.json('path.json').then(function (paths) {
+    possiblePaths = pathDrawCanvas.selectAll('path').data(paths.filter(function (d) {
+      return d.type == 'internal';
+    })).enter().append('path').each(function (pathData,
+      i) {
+      d3.select(this).attrs({
+        d: pathLine([pathData.src, pathData.dst]),
+        id: pathData.id,
         'stroke': 'grey',
         'stroke-width': '0.5',
         fill: 'none',
@@ -92,6 +113,7 @@
     })
     renderPath();
   })
+
 
   pathDensityGroup = {};
   pathLengthGroup = [];
@@ -164,26 +186,93 @@
     return points;
   }
 
-  function findNearestPath(point) {
+  function findNearestExternalPath(point, refPath) {
     let nearestPath = null;
     let distance = Infinity;
-    for (pathNode of possiblePaths.nodes()) {
-      let current = closestPoint(pathNode, point, 0)
-      if (current.distance < distance) {
-        distance = current.distance;
-        nearestPath = pathNode;
+    let refPathData = d3.select(refPath).datum();
+    var refPathAngle = Math.atan2(refPathData.dst[1] - refPathData.src[1], refPathData.dst[0] - refPathData.src[0]) *
+      180 / Math
+      .PI;
+    for (pathNode of externalPossiblePaths.nodes()) {
+      let pathNodeData = d3.select(pathNode).datum();
+      var angle = Math.atan2(pathNodeData.dst[1] - pathNodeData.src[1], pathNodeData.dst[0] - pathNodeData.src[0]) *
+        180 / Math
+        .PI;
+      console.log(refPathData.id, refPathAngle, pathNodeData.id, angle);
+      if (Math.abs(refPathAngle - angle) >= 85 && Math.abs(refPathAngle - angle) <= 95) {
+        let current = closestPoint(pathNode, point, 0)
+
+        if (current.distance < distance) {
+          distance = current.distance;
+          nearestPath = pathNode;
+        }
       }
     }
     return nearestPath;
   }
 
+  function findNearestPath(point, except) {
+    let nearestPath = null;
+    let distance = Infinity;
+    for (pathNode of possiblePaths.nodes()) {
+      //if (except != pathNode) {
+      let current = closestPoint(pathNode, point, 0)
+      if (current.distance < distance) {
+        distance = current.distance;
+        nearestPath = pathNode;
+      }
+      //} else {
+      //console.log("Path matching");
+      //console.log(pathNode);
+      //console.log(except);
+      //}
+    }
+    return nearestPath;
+  }
+
+  function findNearestExternalPathPoints(src, srcPath, dst, dstPath, lineCount, extrnPoints) {
+    extrnPoints = extrnPoints || [];
+    for (pathNode of externalPossiblePaths.nodes()) {
+      let nearPath1 = findNearestExternalPath([src[0], src[1]], srcPath);
+      let x1 = closestPoint(nearPath1, [src[0], src[1]], (pathBandSize / 4 - lineCount) * 0.5)
+      let nearPath2 = findNearestExternalPath([dst[0], dst[1]], dstPath);
+      let x2 = closestPoint(nearPath2, [dst[0], dst[1]], (pathBandSize / 4 - lineCount) * 0.5)
+      if (extrnPoints.length > 0) {
+        let arraySize = extrnPoints.length;
+        extrnPoints.splice(arraySize - 1, 0, [x1[0], x1[1]]);
+        extrnPoints.splice(arraySize - 0, 0, [x2[0], x2[1]]);
+        //extrnPoints[arraySize - 1] = [x1[0], x1[1]];
+        //extrnPoints[arraySize - 0] = [x2[0], x2[1]];
+      } else {
+        extrnPoints.push([x1[0], x1[1]]);
+        extrnPoints.push([x2[0], x2[1]]);
+      }
+      //console.log(x1[0].toFixed(2), x2[0].toFixed(2), x1[0].toFixed(2) == x2[0].toFixed(2));
+      //console.log(x1[1].toFixed(2), x2[1].toFixed(2), x1[1].toFixed(2) == x2[1].toFixed(2));
+      if (x1[0].toFixed(2) == x2[0].toFixed(2) && x1[1].toFixed(2) == x2[1].toFixed(2)) {
+        //console.log("Match", JSON.stringify(extrnPoints));
+        return extrnPoints;
+      } else {
+        //console.log("Not match", JSON.stringify(extrnPoints));
+        return findNearestExternalPathPoints(x1, nearPath1, x2, nearPath2, lineCount, extrnPoints)
+      }
+    }
+    //return extrnPoints;
+    //return extrnPoints;
+  }
+
   function getPath(points, productIndex, lineCount, productLine) {
     jaggedPoints = [];
+    let externalPoints = null;
     pairwise(points, function (current, next, index) {
-      let nearPath = findNearestPath([current.x, current.y]);
-      let x1 = closestPoint(nearPath, [current.x, current.y], (pathBandSize / 4 - lineCount) * 0.5)
-      nearPath = findNearestPath([next.x, next.y]);
-      let x2 = closestPoint(nearPath, [next.x, next.y], (pathBandSize / 4 - lineCount) * 0.5)
+      let nearPath1 = findNearestPath([current.x, current.y]);
+      let x1 = closestPoint(nearPath1, [current.x, current.y], (pathBandSize / 4 - lineCount) * 0.5)
+      nearPath2 = findNearestPath([next.x, next.y]);
+      let x2 = closestPoint(nearPath2, [next.x, next.y], (pathBandSize / 4 - lineCount) * 0.5)
+      if (d3.select(nearPath1).datum().id != d3.select(nearPath2).datum().id) {
+        externalPoints = findNearestExternalPathPoints(x1, nearPath1, x2, nearPath2, lineCount, [])
+      }
+
       jaggedPoints.push(...[
         [current.x, current.y],
         [x1[0], x1[1]]
@@ -192,6 +281,9 @@
         [x2[0], x2[1]],
         [next.x, next.y]
       ]);
+      if (externalPoints) {
+        jaggedPoints.splice(2, 0, ...externalPoints);
+      }
     });
     productPath = curveLine(jaggedPoints);
     let path = pathCanvas.append('path').attrs({
