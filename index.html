@@ -53,6 +53,7 @@
   var pathDrawCanvas = svg.append('g').attr('class', 'path-draw-canvas');
   var extPathDrawCanvas = svg.append('g').attr('class', 'ext-path-draw-canvas');
   var pathCanvas = svg.append('g').attr('class', 'path-canvas');
+  var orderInfoCanvas = svg.append('g').attr('class', 'order_info-canvas');
   var longPathCanvas = svg.append('g').attr('class', 'long-canvas');
   var legendCanvas = svg.append('g').attr('class', 'legend-canvas');
   var infoCanvas = svg.append('g').attr('class', 'info-canvas');
@@ -81,22 +82,22 @@
     });
 
   })
-  d3.json('path.json').then(function (paths) {
-    externalPossiblePaths = extPathDrawCanvas.selectAll('path').data(paths.filter(function (d) {
-      return d.type == 'external';
-    })).enter().append('path').each(function (pathData,
-      i) {
-      d3.select(this).attrs({
-        d: pathLine([pathData.src, pathData.dst]),
-        id: pathData.id,
-        'stroke': 'red',
-        'stroke-width': '0.5',
-        fill: 'none',
-        opacity: 0.3
-      }).classed("baseline", !0);
-    })
-    renderPath();
-  })
+  // d3.json('path.json').then(function (paths) {
+  //   externalPossiblePaths = extPathDrawCanvas.selectAll('path').data(paths.filter(function (d) {
+  //     return d.type == 'external';
+  //   })).enter().append('path').each(function (pathData,
+  //     i) {
+  //     d3.select(this).attrs({
+  //       d: pathLine([pathData.src, pathData.dst]),
+  //       id: pathData.id,
+  //       'stroke': 'red',
+  //       'stroke-width': '0.5',
+  //       fill: 'none',
+  //       opacity: 0.3
+  //     }).classed("baseline", !0);
+  //   })
+  //   renderPath();
+  // })
   d3.json('path.json').then(function (paths) {
     possiblePaths = pathDrawCanvas.selectAll('path').data(paths.filter(function (d) {
       return d.type == 'internal';
@@ -138,17 +139,34 @@
           return d.product;
         })
         .entries(productMoves);
-      //console.log(productGroup);
       for (idx in productGroup) {
         productionLines = productGroup[idx].values
         let productionLinesGroup = d3.nest()
           .key(function (d) {
             return d.production_no;
           }).entries(productionLines);
+        // console.log(productGroup[idx].key, productionLinesGroup.map(function (x) {
+        //   return x.values.map(function (y) {
+        //     return y;
+        //   });
+        // }));
+
+        productionLinesGroup.map(function (x) {
+          // console.log(x.key, ">>>", x.values.map(function (y) {
+          //   return y.node
+          // }).join(' > '))
+        })
         for (productLine of productionLinesGroup) {
           lineCount++;
           var points = [];
-          for (node of productLine.values) {
+          let nodeIdx = 0;
+          let extraData = {};
+          for (node of productLine.values.sort((a, b) => d3.ascending(a.time, b.time))) {
+            if (extraData.hasOwnProperty("#Z-" + node.node)) {
+              continue;
+            }
+            extraData["#Z-" + node.node] = ++nodeIdx;
+
             try {
               let bBox = d3.select('#Z-' + node.node).node().getBBox();
               let point = {
@@ -165,7 +183,7 @@
             }
           }
           points = doDisplacement(points, lineCount);
-          getPath(points, idx, lineCount, productLine);
+          getPath(points, idx, lineCount, productLine, extraData);
 
         }
       }
@@ -190,12 +208,14 @@
     let nearestPath = null;
     let distance = Infinity;
     let refPathData = d3.select(refPath).datum();
-    var refPathAngle = Math.atan2(refPathData.dst[1] - refPathData.src[1], refPathData.dst[0] - refPathData.src[0]) *
+    var refPathAngle = Math.atan2(refPathData.dst[1] - refPathData.src[1], refPathData.dst[0] - refPathData.src[
+        0]) *
       180 / Math
       .PI;
     for (pathNode of externalPossiblePaths.nodes()) {
       let pathNodeData = d3.select(pathNode).datum();
-      var angle = Math.atan2(pathNodeData.dst[1] - pathNodeData.src[1], pathNodeData.dst[0] - pathNodeData.src[0]) *
+      var angle = Math.atan2(pathNodeData.dst[1] - pathNodeData.src[1], pathNodeData.dst[0] - pathNodeData.src[
+          0]) *
         180 / Math
         .PI;
       console.log(refPathData.id, refPathAngle, pathNodeData.id, angle);
@@ -261,7 +281,7 @@
     //return extrnPoints;
   }
 
-  function getPath(points, productIndex, lineCount, productLine) {
+  function getPath(points, productIndex, lineCount, productLine, extraData) {
     jaggedPoints = [];
     let externalPoints = null;
     pairwise(points, function (current, next, index) {
@@ -297,6 +317,7 @@
         return transitionLine(t, 400)
       })
       .on('mouseover', function () {
+        renderOrdering(extraData);
         renderInfoCanvas({
           product: productLine.values[0].product,
           production_no: productLine.values[0].production_no
@@ -310,11 +331,47 @@
         })
       }).on('mouseout', function () {
         removeInfoCanvas();
+        d3.selectAll('.order-info').remove();
         d3.select(this).attrs({
           'opacity': 0.7,
           'stroke-width': 0.1
         })
       });
+  }
+
+  function renderOrdering(extraData) {
+    for (idx in extraData) {
+      bBox = d3.select(idx).node().getBBox();
+      let point = {
+        x: (bBox.x + bBox.width / 2),
+        y: (bBox.y + bBox.height / 2)
+      }
+      let circle = orderInfoCanvas.append('circle').attrs({
+        cx: point.x,
+        cy: point.y,
+        r: 1,
+        class: 'order-info',
+        fill: '#F55E5E'
+      })
+      let circleBbox = circle.node().getBBox();
+      let circleMidPoint = {
+        x: (circleBbox.x + circleBbox.width / 2),
+        y: (circleBbox.y + circleBbox.height / 2)
+      }
+      let fontSize = currentZoom / 20;
+      fontSize = isFinite(fontSize) ? fontSize : 20;
+      fontSize = fontSize < 1 ? 1 : fontSize;
+      orderInfoCanvas.append('text').attrs({
+        x: point.x,
+        y: point.y,
+        class: 'order-info',
+        fill: 'white',
+        'font-size': fontSize,
+        'alignment-baseline': "central",
+        'text-anchor': "middle"
+      }).text(extraData[idx]);
+    }
+
   }
 
   function renderInfoCanvas(data, position) {
